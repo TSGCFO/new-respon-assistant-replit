@@ -54,14 +54,53 @@ export async function POST(request: Request) {
 
     const openai = new OpenAI();
 
+    // Transform messages to new GPT-5 format
+    const transformedInput = messages.map((msg: any) => {
+      // Map old roles to new format
+      let role = msg.role;
+      if (role === 'system') role = 'developer';
+      
+      // Wrap content in proper type structure
+      let content;
+      if (typeof msg.content === 'string') {
+        content = [{ type: 'input_text', text: msg.content }];
+      } else if (Array.isArray(msg.content)) {
+        // Already in array format, ensure proper structure
+        content = msg.content.map((item: any) => {
+          if (item.type === 'text') {
+            return { type: 'input_text', text: item.text };
+          }
+          return item;
+        });
+      } else {
+        content = [{ type: 'input_text', text: String(msg.content) }];
+      }
+      
+      return { role, content };
+    });
+
+    // Add developer instructions as first message if not already present
+    if (!transformedInput.some((msg: any) => msg.role === 'developer')) {
+      transformedInput.unshift({
+        role: 'developer',
+        content: [{ type: 'input_text', text: contextEnhancedInstructions }]
+      });
+    }
+
     const events = await openai.responses.create({
       model: MODEL,
-      input: messages,
-      instructions: contextEnhancedInstructions,
+      input: transformedInput,
+      text: {
+        format: { type: 'text' },
+        verbosity: 'high'
+      },
+      reasoning: {
+        effort: 'high'
+      },
       tools,
+      store: true,
       stream: true,
-      parallel_tool_calls: false,
-    });
+    } as any); // Cast to any to handle new API structure
 
     // Create a ReadableStream that emits SSE data
     const stream = new ReadableStream({
