@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, jsonb, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, integer, jsonb, json, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Conversations table - stores conversation metadata
@@ -36,6 +36,7 @@ export const userMemory = pgTable('user_memory', {
   sessionId: text('session_id').notNull(),
   key: text('key').notNull(), // Memory identifier
   value: text('value').notNull(), // The actual memory content
+  embedding: json('embedding'), // Store vector embedding as JSON array
   category: text('category'), // 'preference', 'fact', 'goal', 'context', etc.
   importance: integer('importance').default(1), // 1-10 scale
   conversationId: integer('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),

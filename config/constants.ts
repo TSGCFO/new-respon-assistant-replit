@@ -1,4 +1,4 @@
-export const MODEL = "gpt-4.1";
+export const MODEL = "gpt-5";
 
 // Developer prompt for the assistant
 export const DEVELOPER_PROMPT = `
@@ -102,9 +102,6 @@ export function getDeveloperPrompt(): string {
   const dayOfMonth = now.getDate();
   return `${DEVELOPER_PROMPT.trim()}\n\nToday is ${dayName}, ${monthName} ${dayOfMonth}, ${year}.`;
 }
-
-// Here is the context that you have available to you:
-// ${context}
 
 // Initial message that will be displayed in the chat
 export const INITIAL_MESSAGE = `

@@ -106,17 +106,18 @@ export class VectorMemoryStore {
 
       const result = JSON.parse(response.choices[0].message.content || '{"memories": []}');
       
-      // Store each extracted memory with its priority
+      // Store each extracted memory with its priority and embedding
       for (const memory of result.memories || []) {
         if (memory.content && memory.content.length > 0) {
-          // Generate embedding for semantic search
+          // Generate embedding ONCE for semantic search
           const embedding = await this.generateEmbedding(memory.content);
           
-          // Store in database with proper importance level
+          // Store in database with embedding
           await db.insert(userMemory).values({
             sessionId: this.sessionId,
             key: `memory_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             value: memory.content,
+            embedding: embedding.length > 0 ? embedding : null, // Store the embedding
             category: memory.category || this.categorizeMemory(memory.content),
             importance: memory.importance || baseImportance,
             conversationId: this.conversationId,
@@ -157,7 +158,7 @@ export class VectorMemoryStore {
       // Generate embedding for the query
       const queryEmbedding = await this.generateEmbedding(queryText);
       
-      // Get all memories for this session
+      // Get all memories with embeddings for this session
       const memories = await db.select()
         .from(userMemory)
         .where(
@@ -168,19 +169,18 @@ export class VectorMemoryStore {
         )
         .orderBy(desc(userMemory.importance), desc(userMemory.updatedAt));
       
-      // Since we don't have embeddings stored in the DB yet, 
-      // we'll generate them on the fly for similarity comparison
-      // In production, these would be pre-computed and stored
-      const memoriesWithScores = await Promise.all(
-        memories.map(async (memory) => {
-          const memoryEmbedding = await this.generateEmbedding(memory.value);
+      // Calculate similarity using STORED embeddings (no API calls!)
+      const memoriesWithScores = memories
+        .filter(memory => memory.embedding != null) // Only memories with embeddings
+        .map(memory => {
+          // Parse the stored embedding (it's stored as JSON)
+          const memoryEmbedding = memory.embedding as number[];
           const similarity = this.cosineSimilarity(queryEmbedding, memoryEmbedding);
           return {
             ...memory,
             relevanceScore: similarity,
           };
-        })
-      );
+        });
       
       // Sort by relevance and return top results
       memoriesWithScores.sort((a, b) => b.relevanceScore - a.relevanceScore);
@@ -234,15 +234,22 @@ export class VectorMemoryStore {
         max_tokens: 150,
       });
 
-      const summary = response.choices[0].message.content?.trim();
+      const summary = response.choices[0].message.content?.trim() || null;
       
-      // Store the summary as a high-importance memory for future retrieval
+      // Store the summary as a high-importance memory with embedding
       if (summary) {
-        await this.extractAndStoreMemory(
-          `Conversation summary: ${summary}`,
-          'assistant',
-          8 // High importance for summaries
-        );
+        const summaryText = `Conversation summary: ${summary}`;
+        const embedding = await this.generateEmbedding(summaryText);
+        
+        await db.insert(userMemory).values({
+          sessionId: this.sessionId,
+          key: `summary_${Date.now()}`,
+          value: summaryText,
+          embedding: embedding.length > 0 ? embedding : null,
+          category: 'summary',
+          importance: 8,
+          conversationId: this.conversationId,
+        });
       }
       
       return summary;
@@ -324,35 +331,6 @@ export class VectorMemoryStore {
     } catch (error) {
       console.error("Failed to search conversation history:", error);
       return [];
-    }
-  }
-
-  // Summarize conversation for long-term memory
-  async summarizeConversation(conversationMessages: any[]): Promise<string> {
-    try {
-      // Prepare messages for summarization
-      const messageText = conversationMessages
-        .filter(m => m.type === 'message')
-        .map(m => `${m.role}: ${m.content?.[0]?.text || ''}`)
-        .join('\n');
-      
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: "Summarize this conversation, highlighting key topics, decisions, and important information shared. Keep it concise (max 200 words)."
-          },
-          { role: "user", content: messageText }
-        ],
-        temperature: 0.5,
-        max_tokens: 250,
-      });
-      
-      return response.choices[0].message.content || '';
-    } catch (error) {
-      console.error("Failed to summarize conversation:", error);
-      return '';
     }
   }
 }
