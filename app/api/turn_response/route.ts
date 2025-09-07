@@ -2,6 +2,7 @@ import { getDeveloperPrompt, MODEL } from "@/config/constants";
 import { getTools } from "@/lib/tools/tools";
 import { getOrCreateSessionId } from "@/lib/session";
 import { VectorMemoryStore } from "@/lib/memory-vector-store";
+import { PreferenceTracker } from "@/lib/preference-tracker";
 import OpenAI from "openai";
 
 export async function POST(request: Request) {
@@ -9,8 +10,9 @@ export async function POST(request: Request) {
     const sessionId = await getOrCreateSessionId();
     const { messages, toolsState } = await request.json();
 
-    // Initialize vector memory store
+    // Initialize memory and preference systems
     const memoryStore = new VectorMemoryStore(sessionId);
+    const preferenceTracker = new PreferenceTracker(sessionId);
 
     // Extract memories from the latest user message if present
     const latestUserMessage = messages
@@ -20,20 +22,29 @@ export async function POST(request: Request) {
     let contextEnhancedInstructions = getDeveloperPrompt();
     
     if (latestUserMessage) {
-      // Store the user's message for future memory
+      // Extract and store memories
       await memoryStore.extractAndStoreMemory(
         latestUserMessage.content,
         'user',
         7 // Default importance for conversation messages
       );
 
-      // Get relevant context for this query
-      const context = await memoryStore.buildContextForQuery(latestUserMessage.content);
-      
-      // Enhance instructions with relevant memories if they exist
-      if (context) {
-        contextEnhancedInstructions = `${getDeveloperPrompt()}\n\n${context}`;
+      // Analyze and save preferences
+      const detectedPreferences = await preferenceTracker.analyzePreferences(latestUserMessage.content);
+      if (Object.keys(detectedPreferences).length > 0) {
+        await preferenceTracker.savePreferences(detectedPreferences);
       }
+
+      // Build comprehensive context
+      const memoryContext = await memoryStore.buildContextForQuery(latestUserMessage.content);
+      const preferenceContext = await preferenceTracker.buildPreferenceContext();
+      
+      // Combine all context sources
+      const contexts: string[] = [getDeveloperPrompt()];
+      if (memoryContext) contexts.push(memoryContext);
+      if (preferenceContext) contexts.push(preferenceContext);
+      
+      contextEnhancedInstructions = contexts.join('\n\n');
     }
 
     const tools = await getTools(toolsState);

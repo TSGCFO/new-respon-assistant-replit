@@ -67,54 +67,61 @@ export class VectorMemoryStore {
   async extractAndStoreMemory(
     messageContent: string,
     role: 'user' | 'assistant',
-    importance: number = 5
+    baseImportance: number = 5
   ): Promise<void> {
     if (role !== 'user') return; // Focus on user messages for memory extraction
 
-    // Use GPT to extract important information
+    // Use GPT to extract important information with priority levels
     try {
       const extractionPrompt = `
         Extract important information from this message that should be remembered for future conversations.
-        Focus on: personal information, preferences, goals, context, relationships, technical choices.
+        
+        Categorize by priority:
+        HIGH (8-10): Names, location, age, occupation, company, contact info
+        MEDIUM (6-8): Preferences, goals, projects, challenges, technical choices
+        LOW (4-6): Context, relationships, tools, historical info
         
         Message: "${messageContent}"
         
-        If there's important information to remember, provide it as a concise summary (max 200 chars).
-        If nothing important, respond with "NONE".
+        Format response as JSON:
+        {
+          "memories": [
+            {"content": "extracted info", "category": "personal_info|preferences|goals|context|technical", "importance": 1-10}
+          ]
+        }
+        
+        If nothing important, respond with: {"memories": []}
       `;
 
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: "You extract and summarize important user information for memory storage." },
+          { role: "system", content: "You extract and categorize important user information for memory storage. Always respond with valid JSON." },
           { role: "user", content: extractionPrompt }
         ],
         temperature: 0.3,
-        max_tokens: 100,
+        max_tokens: 200,
+        response_format: { type: "json_object" }
       });
 
-      const extracted = response.choices[0].message.content?.trim();
+      const result = JSON.parse(response.choices[0].message.content || '{"memories": []}');
       
-      if (extracted && extracted !== "NONE") {
-        // Generate embedding for the extracted memory
-        const embedding = await this.generateEmbedding(extracted);
-        
-        // Determine category based on content
-        const category = this.categorizeMemory(extracted);
-        
-        // Store in database with embedding as JSON
-        await db.insert(userMemory).values({
-          sessionId: this.sessionId,
-          key: `memory_${Date.now()}`,
-          value: extracted,
-          category,
-          importance,
-          conversationId: this.conversationId,
-        });
-        
-        // Note: In a production system, you'd store embeddings in a dedicated vector database
-        // For now, we'll store them in the metadata field as a JSON string
-        // In practice, you'd use pgvector extension or a dedicated service like Pinecone
+      // Store each extracted memory with its priority
+      for (const memory of result.memories || []) {
+        if (memory.content && memory.content.length > 0) {
+          // Generate embedding for semantic search
+          const embedding = await this.generateEmbedding(memory.content);
+          
+          // Store in database with proper importance level
+          await db.insert(userMemory).values({
+            sessionId: this.sessionId,
+            key: `memory_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            value: memory.content,
+            category: memory.category || this.categorizeMemory(memory.content),
+            importance: memory.importance || baseImportance,
+            conversationId: this.conversationId,
+          });
+        }
       }
     } catch (error) {
       console.error("Failed to extract memory:", error);
