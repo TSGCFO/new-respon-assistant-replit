@@ -203,6 +203,55 @@ export class VectorMemoryStore {
     }
   }
 
+  // Summarize conversation for long-term memory
+  async summarizeConversation(messagesData: any[]): Promise<string | null> {
+    if (!messagesData || messagesData.length < 3) return null;
+
+    try {
+      // Format conversation for summarization
+      const conversationText = messagesData
+        .map(msg => `${msg.role}: ${msg.content}`)
+        .join('\n');
+
+      const summaryPrompt = `
+        Summarize this conversation in 2-3 sentences, capturing the main topics, goals, and outcomes.
+        Focus on what the user wanted to achieve and what was accomplished.
+        
+        Conversation:
+        ${conversationText.substring(0, 3000)} // Limit to prevent token overflow
+      `;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { 
+            role: "system", 
+            content: "You create concise, informative summaries of conversations for long-term memory storage." 
+          },
+          { role: "user", content: summaryPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 150,
+      });
+
+      const summary = response.choices[0].message.content?.trim();
+      
+      // Store the summary as a high-importance memory for future retrieval
+      if (summary) {
+        await this.extractAndStoreMemory(
+          `Conversation summary: ${summary}`,
+          'assistant',
+          8 // High importance for summaries
+        );
+      }
+      
+      return summary;
+    } catch (error) {
+      console.error("Failed to summarize conversation:", error);
+      return null;
+    }
+  }
+
   // Build context string from relevant memories
   async buildContextForQuery(query: string): Promise<string> {
     const memories = await this.getRelevantMemories(query);
