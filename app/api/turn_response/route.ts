@@ -106,14 +106,37 @@ export async function POST(request: Request) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          for await (const event of events) {
-            // Sending all events to the client
+          // Handle the response stream - cast to any to handle new API structure
+          const eventStream = events as any;
+          
+          // Check if it's already a stream or if we need to iterate differently
+          if (eventStream && typeof eventStream[Symbol.asyncIterator] === 'function') {
+            for await (const event of eventStream) {
+              // Sending all events to the client
+              const data = JSON.stringify({
+                event: event.type,
+                data: event,
+              });
+              controller.enqueue(`data: ${data}\n\n`);
+            }
+          } else if (eventStream && eventStream.stream) {
+            // If the response has a stream property
+            for await (const event of eventStream.stream) {
+              const data = JSON.stringify({
+                event: event.type,
+                data: event,
+              });
+              controller.enqueue(`data: ${data}\n\n`);
+            }
+          } else {
+            // Fallback: treat it as a single response
             const data = JSON.stringify({
-              event: event.type,
-              data: event,
+              event: 'message',
+              data: eventStream,
             });
             controller.enqueue(`data: ${data}\n\n`);
           }
+          
           // End of stream
           controller.close();
         } catch (error) {
