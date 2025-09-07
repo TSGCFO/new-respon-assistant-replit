@@ -1,6 +1,7 @@
 "use client";
 import Assistant from "@/components/assistant";
 import ToolsPanel from "@/components/tools-panel";
+import ConversationHistory from "@/components/conversation-history";
 import { Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -24,6 +25,7 @@ export default function Main() {
 
   return (
     <div className="flex justify-center h-screen">
+      <ConversationHistory />
       <div className="w-full md:w-[70%]">
         <Assistant />
       </div>
